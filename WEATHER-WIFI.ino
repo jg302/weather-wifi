@@ -11,8 +11,6 @@ DHT dht(DHTPIN, DHTTYPE);
 #define thermistorPin A0
 
 #define ONE_WIRE_BUS 8
-// MOSI  MISO  SCK CS
-// 11  12  13  10
 
 float outdoorTemp;
 float waterTemp;
