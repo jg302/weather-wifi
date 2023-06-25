@@ -9,7 +9,8 @@
 // Pins
 #define DHTPIN 5
 #define thermistorPin A0
-#define ONE_WIRE_BUS 4
+#define ONE_WIRE_BUS 1
+#define ERROR_LED 2
 
 float outdoorTemp;
 float waterTemp;
@@ -37,13 +38,44 @@ char ssid[] = SECRET_SSID;        // your network SSID (name)
 char pass[] = SECRET_PASS;    // your network password (use for WPA, or use as key for WEP)
 char addr[] = SECRET_SERVER_ADDR;
 
-// Initialise wifi
-int port = 80;
 WiFiClient wifi;
+HttpClient client = HttpClient(wifi, serverAddress, 8000);
 
 long seconds(long ms)
 {
   return (ms * 1000);
+}
+
+#define NOWIFI 1
+#define APINOT200 2
+#define TSENSOR 3
+#define HUMIDSENSOR 4 // full deets at https://github.com/amcewen/HttpClient/blob/master/HttpClient.h#L12C1-L24C50
+
+// Todo: this code could delay temperature reading cycle
+void handleError(int code) {
+  Serial.print("Error : ");
+  Serial.println(code);
+  
+  // Blink the light for the error code
+  int i = 0;
+  while (i != code) {
+    digitalWrite(ERROR_LED, HIGH);
+    delay(500);
+    digitalWrite(ERROR_LED, LOW);
+    delay(500);
+    i++;
+  }
+}
+
+void pulse(int pulses) {
+  int i = 0;
+  while (i != pulses) {
+    digitalWrite(ERROR_LED, HIGH);
+    delay(100);
+    digitalWrite(ERROR_LED, LOW);
+    delay(100);
+    i = i + 1;
+  }
 }
 
 void setup() {
@@ -53,6 +85,10 @@ void setup() {
   sensors.begin();
   dht.begin();
   pinMode(LED_BUILTIN, OUTPUT);
+  pinMode(ERROR_LED, OUTPUT);
+
+
+  pulse(4);
 
   total_devices = sensors.getDeviceCount();
   delay(100);
@@ -76,8 +112,6 @@ void loop() {
   Serial.println(T);
   Serial.print("humididty ");
   Serial.println(digitalHumidity);
-  Serial.print("temp digital ");
-  Serial.println(digitalT);
   indoorTemp = T;
 
   // ONE WIRE TEMPS
@@ -101,9 +135,18 @@ void loop() {
       Serial.println(temperature_degreeCelsius);
     }
   }
+  
+  // Error handling
+  if (T <= -40 | T >= 60) {
+    handleError(TSENSOR);
+  }
+  
+  if (digitalHumidity <= 0 | digitalHumidity >= 100) {
+    handleError(HUMIDSENSOR);
+  }
 
   // End temperature reading, do wifi
-  delay(seconds(10));
+  delay(seconds(2));
 
   if (status != WL_CONNECTED) {
     digitalWrite(LED_BUILTIN, HIGH);
@@ -114,11 +157,30 @@ void loop() {
 
   // Make POST request
   if (status == WL_CONNECTED) {
-    WiFiClient client;
-    HttpClient http = HttpClient(wifi, SECRET_SERVER_ADDR, port);
-
     // Data to send with HTTP POST
-    String httpRequestData = "/readings?indoorT=" + String(T) + "&out=" + String(outdoorTemp) + "&waterT=" + String(waterTemp) + "&=humidity" + String(digitalHumidity);
-    int httpResponseCode = http.post(httpRequestData);
+    String httpRequestData = "key=" + String(SECRET_KEY) + "&indoorT=" + String(T) + "&outT=" + String(outdoorTemp) + "&waterT=" + String(waterTemp) + "&=humidity" + String(digitalHumidity);
+    String contentType = "application/x-www-form-urlencoded";
+
+    int httpResponseCode = client.post("/readings", contentType, httpRequestData);
+    
+    int dave = client.get("/readings");
+      // read the status code and body of the response
+  int statusCode = client.responseStatusCode();
+  String response = client.responseBody();
+  Serial.print("Status code: ");
+  Serial.println(statusCode);
+  Serial.print("Response: ");
+  Serial.println(response);
+
+    
+    Serial.println(httpResponseCode);
+    
+    if (httpResponseCode != 0) {
+      handleError(APINOT200);
+    } else {
+      pulse(2);
+    }
+  } else {
+    handleError(NOWIFI); 
   }
 }
